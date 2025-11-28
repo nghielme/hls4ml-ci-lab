@@ -1,4 +1,4 @@
-# hls4ml-ci-lab
+# `hls4ml` CI Lab
 
 Utilities and structure to run multiple `hls4ml` experiments in a consistent
 way both locally and in GitLab CI.
