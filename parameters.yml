@@ -1,0 +1,6 @@
+# example parameters file
+branches:
+  baseline: main
+  experiment: feature-123
+image: registry.example.com/hls4ml
+tag: gpu-runner

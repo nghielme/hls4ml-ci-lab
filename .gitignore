@@ -1,0 +1,6 @@
+hls4ml/
+__pycache__/
+*.py[cod]
+*$py.class
+.vscode
+.DS_Store

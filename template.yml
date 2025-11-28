@@ -1,0 +1,92 @@
+.generate-template:
+  cache:
+    key: "$TARGET_EXPERIMENT-conda-env"
+    paths:
+      - "$TARGET_EXPERIMENT-conda-env.tar.gz"
+    policy: pull-push
+  script:
+    - |
+      set -e
+      source /opt/conda/etc/profile.d/conda.sh
+      ENV_NAME="${TARGET_EXPERIMENT:-experiment-env}"
+      ENV_ARCHIVE="${ENV_NAME}-conda-env.tar.gz"
+      mkdir -p dataset
+      ENV_PATH="$CI_PROJECT_DIR/$PROJECT_DIR/environment.yml"
+      if [ -n "$ENV_FILE" ] && [ -f "$CI_PROJECT_DIR/$ENV_FILE" ]; then
+        ENV_PATH="$CI_PROJECT_DIR/$ENV_FILE"
+      fi
+      if [ ! -f "$ENV_PATH" ]; then
+        echo "Unable to find environment file at $ENV_PATH" >&2
+        exit 1
+      fi
+      conda env remove -n "$ENV_NAME" || true
+      conda env create -n "$ENV_NAME" -f "$ENV_PATH"
+      tar -czf "$ENV_ARCHIVE" -C /opt/conda/envs "$ENV_NAME"
+      conda activate "$ENV_NAME"
+    - cd $CI_PROJECT_DIR/$PROJECT_DIR
+    - python3 run.py --stage generate
+  artifacts:
+    paths:
+      - $PROJECT_DIR/
+    when: always
+    expire_in: 2weeks
+
+
+.synthetise-template:
+  cache:
+    key: "$TARGET_EXPERIMENT-conda-env"
+    paths:
+      - "$TARGET_EXPERIMENT-conda-env.tar.gz"
+      - dataset/
+    policy: pull-push
+  before_script:
+    - |
+      set -e
+      source /opt/conda/etc/profile.d/conda.sh
+      ENV_NAME="${TARGET_EXPERIMENT:-experiment-env}"
+      ENV_ARCHIVE="${ENV_NAME}-conda-env.tar.gz"
+      mkdir -p dataset
+      if [ ! -f "$ENV_ARCHIVE" ]; then
+        echo "Cached environment archive missing" >&2
+        exit 1
+      fi
+      tar xf "$ENV_ARCHIVE" -C /opt/conda/envs/
+      conda activate "$ENV_NAME"
+  script:
+    - cd $CI_PROJECT_DIR/$PROJECT_DIR
+    - python3 run.py --stage synthetise
+  artifacts:
+    paths:
+      - $PROJECT_DIR/myproject
+    when: always
+    expire_in: 2weeks
+
+
+.analyse-template:
+  cache:
+    key: "$TARGET_EXPERIMENT-conda-env"
+    paths:
+      - "$TARGET_EXPERIMENT-conda-env.tar.gz"
+      - dataset/
+    policy: pull-push
+  before_script:
+    - |
+      set -e
+      source /opt/conda/etc/profile.d/conda.sh
+      ENV_NAME="${TARGET_EXPERIMENT:-experiment-env}"
+      ENV_ARCHIVE="${ENV_NAME}-conda-env.tar.gz"
+      mkdir -p dataset
+      if [ ! -f "$ENV_ARCHIVE" ]; then
+        echo "Cached environment archive missing" >&2
+        exit 1
+      fi
+      tar xf "$ENV_ARCHIVE" -C /opt/conda/envs/
+      conda activate "$ENV_NAME"
+  script:
+    - cd $CI_PROJECT_DIR/common # this stage collects the artifacts from the previous stage of all the jobs
+    - python3 script.py --stage analyse
+  artifacts:
+    paths:
+      - results/
+    when: always
+    expire_in: 2weeks
