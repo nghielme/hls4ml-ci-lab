@@ -111,16 +111,16 @@ def make_synthetise_job(
     return job
 
 
-def render_environment_file(repo_root: str, project_dir: str, experiment: str, branch: str) -> Optional[str]:
-    """Render a per-experiment environment file with the selected branch."""
+def render_environment_file(repo_root: str, project_dir: str, experiment: str, branch: str, hls4ml_url: Optional[str] = None) -> Optional[str]:
+    """Render a per-experiment environment file with the selected branch and HLS4ML URL."""
     exp_dir = Path(repo_root) / project_dir
     exp_env = exp_dir / "environment.yml"
-    common_env = Path(repo_root) / "common" / "environment.yml"
+    template_env = Path(repo_root) / "experiments" / "template" / "environment.yml"
 
     if exp_env.exists():
         source = exp_env
-    elif common_env.exists():
-        source = common_env
+    elif template_env.exists():
+        source = template_env
     else:
         return None
 
@@ -130,6 +130,12 @@ def render_environment_file(repo_root: str, project_dir: str, experiment: str, b
         return None
 
     rendered = template.replace("{BRANCH}", branch).replace("{TARGET_EXPERIMENT}", experiment)
+    if hls4ml_url:
+        rendered = rendered.replace("{HLS4ML_URL}", hls4ml_url)
+    else:
+        # Default to the standard hls4ml repository if not specified
+        rendered = rendered.replace("{HLS4ML_URL}", "https://github.com/fastmachinelearning/hls4ml.git")
+    
     dest = exp_dir / "environment.rendered.yml"
 
     try:
@@ -210,8 +216,18 @@ def generate_gitlab_ci(
     branches: Dict[str, str],
     image_path: Optional[str],
     image_tag: Optional[str],
+    hls4ml_urls: Dict[str, str],
 ) -> Dict:
-    """Generate GitLab CI configuration for the provided experiments."""
+    """Generate GitLab CI configuration for the provided experiments.
+    
+    Args:
+        repo_root: Root directory of the repository
+        experiments: List of experiment names
+        branches: Dictionary mapping experiment names to branch names
+        image_path: Container image path (optional)
+        image_tag: Container image tag (optional)
+        hls4ml_urls: Dictionary mapping experiment names to hls4ml repository URLs
+    """
     if not experiments:
         print("No experiments found under 'experiments/'. Nothing to generate.")
         return {}
@@ -231,7 +247,9 @@ def generate_gitlab_ci(
 
         # Get branch for this experiment, default to 'main'
         branch = branches.get(exp, "main")
-        env_file = render_environment_file(repo_root, project_dir, exp, branch)
+        # Get hls4ml_url for this experiment, default to official repo
+        hls4ml_url = hls4ml_urls.get(exp, "https://github.com/fastmachinelearning/hls4ml.git")
+        env_file = render_environment_file(repo_root, project_dir, exp, branch, hls4ml_url)
 
         ci[generate_job_name] = make_generate_job(
             exp, project_dir, branch, env_file, image_path, image_tag
@@ -261,48 +279,58 @@ def write_yaml(data: Dict, path: str) -> None:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
-def parse_branches(branch_arg: Optional[str]) -> Dict[str, str]:
+def parse_branches(branch_arg: Optional[str]) -> tuple[Dict[str, str], Dict[str, str]]:
     """Parse branch specification from command-line argument.
     
-    Accepts formats:
-    - "experiment1:branch1,experiment2:branch2" (per-experiment mapping)
-    - "branch_name" (single branch for all experiments)
+    Accepts format:
+    - "experiment1:url1@branch1,experiment2:url2@branch2" (per-experiment mapping with URLs)
     
     Args:
         branch_arg: Branch specification string
     
     Returns:
-        Dictionary mapping experiment names to branch names
+        Tuple of (branches_dict, urls_dict) mapping experiment names to branch names and URLs
     """
     branches: Dict[str, str] = {}
+    urls: Dict[str, str] = {}
     
     if not branch_arg:
-        return branches
+        return branches, urls
     
-    # Check if it's a comma-separated list of experiment:branch pairs
-    if ',' in branch_arg or ':' in branch_arg:
-        # Try to parse as experiment:branch pairs
-        for pair in branch_arg.split(','):
-            pair = pair.strip()
-            if ':' in pair:
-                exp, branch = pair.split(':', 1)
-                branches[exp.strip()] = branch.strip()
-            else:
-                # If no colon, treat as single branch for all
-                return {}  # Will be handled below
-    else:
-        # Single branch name - will be applied to all experiments
-        return {"*": branch_arg.strip()}
+    # Must be comma-separated list of experiment:url@branch pairs
+    if ',' not in branch_arg and ':' not in branch_arg:
+        print(f"Error: --branches must use format 'exp:url@branch'. Got: {branch_arg}", file=sys.stderr)
+        sys.exit(1)
     
-    return branches
+    # Parse experiment:url@branch pairs
+    for pair in branch_arg.split(','):
+        pair = pair.strip()
+        if ':' not in pair:
+            print(f"Error: each branch specification must be in format 'exp:url@branch'. Got: {pair}", file=sys.stderr)
+            sys.exit(1)
+        
+        exp, value = pair.split(':', 1)
+        exp = exp.strip()
+        # Must contain @ (url@branch format)
+        if '@' not in value:
+            print(f"Error: per-experiment branches must include URL in format 'exp:url@branch'. Got: {exp}:{value}", file=sys.stderr)
+            sys.exit(1)
+        
+        url, branch = value.rsplit('@', 1)
+        branches[exp] = branch.strip()
+        urls[exp] = url.strip()
+    
+    return branches, urls
 
 
 def normalize_branch_spec(spec: Any) -> Dict[str, str]:
-    """Normalize branches specification from CLI/config formats."""
+    """Normalize branches specification from CLI/config formats (legacy, URLs not supported)."""
     if spec is None:
         return {}
     if isinstance(spec, str):
-        return parse_branches(spec)
+        # Legacy format - just parse branches, URLs will default
+        branches, _ = parse_branches(spec)
+        return branches
     if isinstance(spec, dict):
         return {str(k): str(v) for k, v in spec.items()}
     if isinstance(spec, list):
@@ -314,6 +342,42 @@ def normalize_branch_spec(spec: Any) -> Dict[str, str]:
     return {}
 
 
+def parse_branch_and_url(value: str) -> tuple[str, str]:
+    """Parse "branch, url" or just "branch" from a string.
+    
+    Returns:
+        Tuple of (branch, url). URL defaults to official repo if not provided.
+    """
+    parts = [p.strip() for p in value.split(',', 1)]
+    branch = parts[0]
+    url = parts[1] if len(parts) > 1 else "https://github.com/fastmachinelearning/hls4ml.git"
+    return branch, url
+
+
+def normalize_branches_with_urls(spec: Any) -> tuple[Dict[str, str], Dict[str, str]]:
+    """Normalize branches specification that may include URLs.
+    
+    Accepts:
+    - None: returns empty dicts
+    - dict: mapping of experiment -> "branch" or "branch, url"
+    
+    Returns:
+        Tuple of (branches_dict, urls_dict)
+    """
+    if spec is None:
+        return {}, {}
+    if isinstance(spec, dict):
+        branches: Dict[str, str] = {}
+        urls: Dict[str, str] = {}
+        for exp, value in spec.items():
+            branch, url = parse_branch_and_url(str(value))
+            branches[str(exp)] = branch
+            urls[str(exp)] = url
+        return branches, urls
+    print(f"Warning: unsupported branches specification '{spec}'.", file=sys.stderr)
+    return {}, {}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate GitLab CI configuration from experiments"
@@ -321,8 +385,7 @@ def main() -> None:
     parser.add_argument(
         "--branches",
         type=str,
-        help="Branch specification: 'branch_name' for all experiments, "
-             "or 'exp1:branch1,exp2:branch2' for per-experiment branches"
+        help="Branch specification: 'exp1:url1@branch1,exp2:url2@branch2' for per-experiment branches with URLs"
     )
     parser.add_argument(
         "--image",
@@ -332,7 +395,13 @@ def main() -> None:
     parser.add_argument(
         "--tag",
         type=str,
-        help="Container image tag. Combined with --image to form image:tag",
+        help="Container image tag for the runner machine",
+    )
+    parser.add_argument(
+        "--hls4ml-url",
+        type=str,
+        help="URL of the hls4ml repository for all experiments (defaults to https://github.com/fastmachinelearning/hls4ml.git). "
+             "Use parameters file for per-experiment URLs.",
     )
     parser.add_argument(
         "--parameters",
@@ -358,33 +427,43 @@ def main() -> None:
     param_data = load_parameters_file(param_path, warn_missing_params)
     
     # Parameters precedence: config file -> CLI overrides
-    branch_spec = normalize_branch_spec(param_data.get("branches"))
+    # Parse branches (which may include URLs in "branch, url" format)
+    branch_spec_from_file, url_spec_from_file = normalize_branches_with_urls(param_data.get("branches"))
     image_value = param_data.get("image")
     tag_value = param_data.get("tag")
     
+    # Handle CLI overrides
+    branch_spec = branch_spec_from_file.copy()
+    url_spec = url_spec_from_file.copy()
+    
     if args.branches:
-        branch_spec = parse_branches(args.branches)
+        # CLI branches format: "exp1:url1@branch1,exp2:url2@branch2" or "exp1:branch1,exp2:branch2"
+        branch_spec_cli, url_spec_cli = parse_branches(args.branches)
+        branch_spec = branch_spec_cli
+        url_spec = url_spec_cli
     if args.image is not None:
         image_value = args.image
     if args.tag is not None:
         tag_value = args.tag
+    if args.hls4ml_url is not None:
+        # CLI --hls4ml-url overrides all experiment URLs
+        url_spec = {exp: args.hls4ml_url for exp in branch_spec.keys()}
     
-    # If a default branch was specified, we need to get the list of experiments first
-    if "*" in branch_spec:
-        experiments = [
-            exp for exp in find_experiments(experiments_root) if exp != "template"
-        ]
-        default_branch = branch_spec["*"]
-        branch_spec = {exp: default_branch for exp in experiments}
-    else:
-        experiments = prepare_experiment_dirs(repo_root, branch_spec)
-        if not branch_spec:
-            branch_spec = {exp: "main" for exp in experiments}
+    # Prepare experiment directories and ensure all have branch/URL specs
+    experiments = prepare_experiment_dirs(repo_root, branch_spec)
+    if not branch_spec:
+        # If no branches specified, default all to main with official repo
+        branch_spec = {exp: "main" for exp in experiments}
+    # Ensure URLs exist for all experiments
+    for exp in experiments:
+        if exp not in url_spec:
+            url_spec[exp] = "https://github.com/fastmachinelearning/hls4ml.git"
     
     ci = generate_gitlab_ci(
         repo_root, experiments, branch_spec,
         str(image_value) if image_value is not None else None,
         str(tag_value) if tag_value is not None else None,
+        url_spec,
     )
     if not ci:
         # Still write a minimal stages section so pipeline is valid but empty

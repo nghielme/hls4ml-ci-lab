@@ -1,6 +1,6 @@
 # example parameters file
 branches:
-  baseline: main
-  experiment: feature-123
+  baseline: main, https://github.com/fastmachinelearning/hls4ml.git
+  experiment: feature-123, https://github.com/custom/hls4ml-fork.git
 image: registry.example.com/hls4ml
 tag: gpu-runner

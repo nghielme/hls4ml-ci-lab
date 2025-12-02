@@ -13,7 +13,7 @@ way both locally and in GitLab CI.
   - `pre_script.py` / `post_script.py`: custom hooks executed before/after
     the shared logic in `common/script.py`.
   - `environment.yml`: conda/pip requirements for the experiment. If missing,
-    `common/environment.yml` is used.
+    `experiments/template/environment.yml` is used.
 - `common/`
   - `script.py`: shared experiment logic (imported by every `run.py`).
   - `environment.yml`: default environment used when an experiment does not
@@ -36,7 +36,7 @@ way both locally and in GitLab CI.
      generated, the file is rendered to `environment.rendered.yml` with
      `{BRANCH}` and `{TARGET_EXPERIMENT}` substituted.
    - If an experiment does not ship `environment.yml`, the generator falls
-     back to `common/environment.yml`.
+     back to `experiments/template/environment.yml`.
    - During the `generate` stage the pipeline sources Miniforge, creates a conda
      env named after the experiment (e.g. `baseline`), archives it as
      `<experiment>-conda-env.tar.gz`, and caches both the archive and any
@@ -63,17 +63,14 @@ per experiment (or a single default branch), and optionally the container image
 and runner tag that should run the jobs:
 
 ```bash
-# One branch for every experiment, using a shared image tag
-python3 generate_ci.py --branches main --image registry.example.com/hls4ml --tag 2024.11
-
-# Different branches per experiment
-python3 generate_ci.py --branches baseline:main,experiment:feature-123
+# Different branches and URLs per experiment (format: exp:url@branch)
+python3 generate_ci.py --branches "baseline:https://github.com/fastmachinelearning/hls4ml.git@main,experiment:https://github.com/custom/hls4ml-fork.git@feature-123" --image registry.example.com/hls4ml --tag 2024.11
 
 # Using a parameters file
 python3 generate_ci.py --parameters parameters.yml
 ```
 
-When you pass `exp:branch` pairs the script clones `experiments/template`
+When you pass `exp:url@branch` pairs the script clones `experiments/template`
 into `experiments/<exp>/` (if it does not already exist) before generating CI.
 This lets you create whole experiment suites just by naming them on the command
 line.
@@ -93,6 +90,11 @@ Each job gets the following variables:
 - `IMAGE`: container image string supplied via CLI/parameters file
 - `TAG`: runner tag supplied via CLI/parameters file (to select GitLab runners)
 
+The `environment.yml` files support template variables:
+- `{TARGET_EXPERIMENT}`: replaced with the experiment name
+- `{BRANCH}`: replaced with the hls4ml branch name
+- `{HLS4ML_URL}`: replaced with the hls4ml repository URL for that experiment (defaults to `https://github.com/fastmachinelearning/hls4ml.git` if not specified per-experiment)
+
 Regenerate `.gitlab-ci.yml` whenever you add/remove experiments or change
 branch mappings.
 
@@ -104,15 +106,15 @@ Recommended workflow:
 
 1. Keep `experiments/template/` up to date with the baseline structure you want.
 2. Create or update `parameters.yml` (see below) with the experiments you want,
-   or run `python3 generate_ci.py --branches newexp:my-branch` to clone the
-   template into `experiments/newexp/`, render its environment file, and update
+   or run `python3 generate_ci.py --branches newexp:https://github.com/fastmachinelearning/hls4ml.git@my-branch`
+   to clone the template into `experiments/newexp/`, render its environment file, and update
    `.gitlab-ci.yml`.
 3. Customize `experiments/newexp/` as needed (configs, hooks, etc.) and rerun
    the generator.
 4. Commit the new experiment directory along with the regenerated CI file.
 
 Manual creation still works (just make the directory yourself); in that case
-pass `--branches main` to apply a single branch to all existing experiments.
+use the parameters file or specify branches in the `exp:url@branch` format.
 
 ---
 
@@ -138,11 +140,13 @@ present) or pass a custom path via `--parameters path/to/file.yml`.
 ```yaml
 # parameters.yml
 branches:
-  baseline: main
-  experiment: feature-123
+  baseline: main, https://github.com/fastmachinelearning/hls4ml.git
+  experiment: feature-123, https://github.com/custom/hls4ml-fork.git
 image: registry.example.com/hls4ml
 tag: gpu-runner
 ```
+
+Each experiment can specify both the branch and the hls4ml repository URL in the format `branch, url`. If the URL is omitted, it defaults to the official repository (`https://github.com/fastmachinelearning/hls4ml.git`). You can also use `--hls4ml-url <url>` to set a single URL for all experiments (overrides the parameters file).
 
 CLI flags always override the file (e.g. `--image` to temporarily change the
 container, `--branches` to generate a different experiment set).
@@ -152,11 +156,11 @@ container, `--branches` to generate a different experiment set).
 ## Troubleshooting
 
 - **Missing environment file**: the CI generator will fall back to
-  `common/environment.yml`. If neither file exists, the pipeline prints a
+  `experiments/template/environment.yml`. If neither file exists, the pipeline prints a
   warning before running the stage.
 - **Branch not checked out**: specify the desired branch via `--branches` when
   running `generate_ci.py`. For a single default branch, pass just the branch
-  name. For mixed branches, use `exp:branch` pairs.
+  name. For mixed branches, use `exp:url@branch` format to specify both the repository URL and branch.
 - **New experiments not in CI**: rerun `generate_ci.py` whenever you add or
   remove experiment directories.
 
