@@ -234,6 +234,9 @@ def generate_gitlab_ci(
 
     ci: Dict = {}
 
+    # Include templates.yml
+    ci["include"] = [{"local": "templates.yml"}]
+
     # Define stages
     ci["stages"] = ["generate", "synthetise", "analyse"]
 
@@ -242,8 +245,8 @@ def generate_gitlab_ci(
     # Jobs per experiment
     for exp in experiments:
         project_dir = f"experiments/{exp}"
-        generate_job_name = f"generate:{exp}"
-        syn_job_name = f"synthetise:{exp}"
+        generate_job_name = f"generate_{exp}"
+        syn_job_name = f"synthetise_{exp}"
 
         # Get branch for this experiment, default to 'main'
         branch = branches.get(exp, "main")
