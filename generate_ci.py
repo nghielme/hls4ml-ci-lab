@@ -409,7 +409,7 @@ def main() -> None:
     parser.add_argument(
         "--parameters",
         type=str,
-        help="Path to a YAML parameters file (defaults to parameters.yml if present)",
+        help="Path to a YAML parameters file (defaults to parameters.yml if present; see parameters-example.yml for format)",
     )
     args = parser.parse_args()
     

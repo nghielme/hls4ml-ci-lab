@@ -66,7 +66,7 @@ and runner tag that should run the jobs:
 # Different branches and URLs per experiment (format: exp:url@branch)
 python3 generate_ci.py --branches "baseline:https://github.com/fastmachinelearning/hls4ml.git@main,experiment:https://github.com/custom/hls4ml-fork.git@feature-123" --image registry.example.com/hls4ml --tag 2024.11
 
-# Using a parameters file
+# Using a parameters file (copy parameters-example.yml to parameters.yml first)
 python3 generate_ci.py --parameters parameters.yml
 ```
 
@@ -105,7 +105,7 @@ branch mappings.
 Recommended workflow:
 
 1. Keep `experiments/template/` up to date with the baseline structure you want.
-2. Create or update `parameters.yml` (see below) with the experiments you want,
+2. Copy `parameters-example.yml` to `parameters.yml` and update it with the experiments you want,
    or run `python3 generate_ci.py --branches newexp:https://github.com/fastmachinelearning/hls4ml.git@my-branch`
    to clone the template into `experiments/newexp/`, render its environment file, and update
    `.gitlab-ci.yml`.
@@ -136,9 +136,10 @@ local Python environment (the CI pipeline installs them automatically).
 
 You can store all generator options in `parameters.yml` (auto-detected if
 present) or pass a custom path via `--parameters path/to/file.yml`.
+Copy `parameters-example.yml` to `parameters.yml` as a starting point.
 
 ```yaml
-# parameters.yml
+# parameters.yml (based on parameters-example.yml)
 branches:
   baseline: main, https://github.com/fastmachinelearning/hls4ml.git
   experiment: feature-123, https://github.com/custom/hls4ml-fork.git
